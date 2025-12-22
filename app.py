@@ -14,14 +14,29 @@ def root():
 
 @app.get("/predict")
 def predict(url: str):
-    features = extract_features(url)
-    X = pd.DataFrame([features])
+    if model is None:
+        raise HTTPException(status_code=500, detail="Model not loaded")
 
-    prob = model.predict_proba(X)[0][1]
-    prediction = "PHISHING" if prob >= 0.5 else "LEGITIMATE"
+    try:
+        features = extract_features(url)
 
-    return {
-        "url": url,
-        "phishing_probability": round(float(prob), 4),
-        "prediction": prediction
-    }
+        X = pd.DataFrame([features])
+
+        # enforce exact feature order
+        X = X.reindex(columns=feature_names, fill_value=0)
+
+        # 🔑 FORCE NUMERIC TYPES (CRITICAL FIX)
+        X = X.apply(pd.to_numeric, errors="coerce").fillna(0)
+
+        prob = float(model.predict_proba(X)[0][1])
+        prediction = "PHISHING" if prob >= 0.5 else "LEGITIMATE"
+
+        return {
+            "url": url,
+            "phishing_probability": round(prob, 4),
+            "prediction": prediction
+        }
+
+    except Exception as e:
+        print("❌ Prediction error:", traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
