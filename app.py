@@ -1,12 +1,17 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 import joblib
 import pandas as pd
+import traceback
+
 from feature_extractor import extract_features
 
 app = FastAPI()
 
-# Load model once at startup
+# Load model
 model = joblib.load("model.pkl")
+
+# ✅ Get feature names directly from the trained model
+feature_names = list(model.feature_names_in_)
 
 @app.get("/")
 def root():
@@ -14,20 +19,20 @@ def root():
 
 @app.get("/predict")
 def predict(url: str):
-    if model is None:
-        raise HTTPException(status_code=500, detail="Model not loaded")
-
     try:
+        # Extract features
         features = extract_features(url)
 
+        # Convert to DataFrame
         X = pd.DataFrame([features])
 
-        # enforce exact feature order
+        # ✅ Align features exactly as training
         X = X.reindex(columns=feature_names, fill_value=0)
 
-        # 🔑 FORCE NUMERIC TYPES (CRITICAL FIX)
+        # ✅ FORCE numeric types (CRITICAL)
         X = X.apply(pd.to_numeric, errors="coerce").fillna(0)
 
+        # Predict
         prob = float(model.predict_proba(X)[0][1])
         prediction = "PHISHING" if prob >= 0.5 else "LEGITIMATE"
 
@@ -38,5 +43,5 @@ def predict(url: str):
         }
 
     except Exception as e:
-        print("❌ Prediction error:", traceback.format_exc())
+        print("❌ Prediction error:\n", traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
