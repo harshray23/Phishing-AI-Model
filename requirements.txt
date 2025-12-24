@@ -1,9 +1,6 @@
 fastapi
 uvicorn
-pandas
-numpy
-scikit-learn
-xgboost
 joblib
-tldextract
-python-multipart
+pandas
+xgboost
+python-whois

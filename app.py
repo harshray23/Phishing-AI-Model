@@ -1,38 +1,34 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 import joblib
 import pandas as pd
 import traceback
 
 from feature_extractor import extract_features
 
-app = FastAPI()
+app = FastAPI(title="Phishing Detection API")
 
-# Load model
+# Load model + features
 model = joblib.load("model.pkl")
+FEATURES = joblib.load("features.pkl")
 
-# ✅ Get feature names directly from the trained model
-feature_names = list(model.feature_names_in_)
 
 @app.get("/")
 def root():
-    return {"message": "Phishing Detection API is running"}
+    return {"status": "Phishing Detection API running"}
+
 
 @app.get("/predict")
 def predict(url: str):
     try:
-        # Extract features
         features = extract_features(url)
 
-        # Convert to DataFrame
+        # Create DataFrame with correct feature order
         X = pd.DataFrame([features])
+        X = X.reindex(columns=FEATURES, fill_value=0)
 
-        # ✅ Align features exactly as training
-        X = X.reindex(columns=feature_names, fill_value=0)
+        # Force numeric (fixes XGBoost object dtype crash)
+        X = X.astype(float)
 
-        # ✅ FORCE numeric types (CRITICAL)
-        X = X.apply(pd.to_numeric, errors="coerce").fillna(0)
-
-        # Predict
         prob = float(model.predict_proba(X)[0][1])
         prediction = "PHISHING" if prob >= 0.5 else "LEGITIMATE"
 
@@ -42,6 +38,8 @@ def predict(url: str):
             "prediction": prediction
         }
 
-    except Exception as e:
-        print("❌ Prediction error:\n", traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        return {
+            "error": "Prediction failed",
+            "trace": traceback.format_exc()
+        }
