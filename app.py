@@ -1,45 +1,86 @@
 from fastapi import FastAPI
-import joblib
 import pandas as pd
-import traceback
+import joblib
 
-from feature_extractor import extract_features
+from feature_extractor import extract_features_async
+from explain import explain_prediction
+from drift import detect_drift
 
-app = FastAPI(title="Phishing Detection API")
+from fastapi.responses import FileResponse
+from explain import explain_prediction, shap_waterfall
 
-# Load model + features
+
+app = FastAPI()
+
 model = joblib.load("model.pkl")
 FEATURES = joblib.load("features.pkl")
 
-
-@app.get("/")
-def root():
-    return {"status": "Phishing Detection API running"}
-
-
 @app.get("/predict")
-def predict(url: str):
-    try:
-        features = extract_features(url)
+async def predict(url: str):
+    features = await extract_features_async(url)
+    df = pd.DataFrame([features])[FEATURES]
+    drift = detect_drift(X)
+    prob = float(model.predict_proba(df)[0][1])
+    prediction = "PHISHING" if prob > 0.5 else "LEGIT"
 
-        # Create DataFrame with correct feature order
-        X = pd.DataFrame([features])
-        X = X.reindex(columns=FEATURES, fill_value=0)
+    explanation = explain_prediction(df)
 
-        # Force numeric (fixes XGBoost object dtype crash)
-        X = X.astype(float)
+    return {
+        "url": url,
+        "prediction": prediction,
+        "confidence": round(prob, 4),
+        "explanation": explanation
+    }
 
-        prob = float(model.predict_proba(X)[0][1])
-        prediction = "PHISHING" if prob >= 0.5 else "LEGITIMATE"
 
-        return {
+@app.post("/batch")
+async def batch_predict(urls: list[str]):
+    results = []
+    for url in urls:
+        features = await extract_features_async(url)
+        df = pd.DataFrame([features])[FEATURES]
+        prob = float(model.predict_proba(df)[0][1])
+
+        results.append({
             "url": url,
-            "phishing_probability": round(prob, 4),
-            "prediction": prediction
-        }
+            "prediction": "PHISHING" if prob > 0.5 else "LEGIT",
+            "confidence": round(prob, 4)
+        })
+    return results
+@app.get("/explain/plot")
+async def explain_plot(url: str):
+    features = await extract_features_async(url)
 
-    except Exception:
-        return {
-            "error": "Prediction failed",
-            "trace": traceback.format_exc()
-        }
+    X = pd.DataFrame([features]).reindex(
+        columns=FEATURES,
+        fill_value=0
+    )
+
+    path = shap_waterfall(X)
+    return FileResponse(path, media_type="image/png")
+
+
+@app.get("/explain")
+async def explain(url: str):
+    features = await extract_features_async(url)
+
+    X = pd.DataFrame([features]).reindex(columns=FEATURES, fill_value=0)
+
+    shap_values = explain_prediction(X)
+
+    return {
+        "url": url,
+        "shap_values": shap_values
+    }
+@app.get("/drift")
+async def drift(url: str):
+    features = await extract_features_async(url)
+    X = pd.DataFrame([features]).reindex(columns=FEATURES, fill_value=0)
+
+    drift_scores = detect_drift(X)
+
+    return {
+        "url": url,
+        "drift_scores": drift_scores,
+        "drift_detected": any(v > 3 for v in drift_scores.values())
+    }
