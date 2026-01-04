@@ -16,21 +16,25 @@ model = joblib.load("model.pkl")
 FEATURES = joblib.load("features.pkl")
 
 @app.get("/predict")
-async def predict(url: str):
-    features = await extract_features_async(url)
-    df = pd.DataFrame([features])[FEATURES]
-    drift = detect_drift(X)
-    prob = float(model.predict_proba(df)[0][1])
-    prediction = "PHISHING" if prob > 0.5 else "LEGIT"
+async def predict(url: str, request: Request):
+    try:
+        features = await extract_features_async(url)
+        logger.info(f"Extracted features: {features}")
 
-    explanation = explain_prediction(df)
+        X = pd.DataFrame([features]).reindex(columns=FEATURES, fill_value=0)
 
-    return {
-        "url": url,
-        "prediction": prediction,
-        "confidence": round(prob, 4),
-        "explanation": explanation
-    }
+        prob = float(model.predict_proba(X)[0][1])
+        prediction = "PHISHING" if prob > 0.5 else "LEGITIMATE"
+
+        return {
+            "url": url,
+            "prediction": prediction,
+            "probability": round(prob, 4)
+        }
+
+    except Exception as e:
+        logger.exception("Prediction failed")
+        return {"error": str(e)}
 
 
 @app.post("/batch")
