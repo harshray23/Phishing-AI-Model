@@ -1,8 +1,6 @@
-from fastapi import FastAPI, Request
-
+from fastapi import FastAPI, Query, Request
 import pandas as pd
 import joblib
-
 from feature_extractor import extract_features_async
 from explain import explain_prediction
 from drift import detect_drift
@@ -17,25 +15,23 @@ model = joblib.load("model.pkl")
 FEATURES = joblib.load("features.pkl")
 
 @app.get("/predict")
-async def predict(url: str, request: Request):
-    try:
-        features = await extract_features_async(url)
-        logger.info(f"Extracted features: {features}")
+async def predict(url: str = Query(...)):
+    features = extract_features(url)
 
-        X = pd.DataFrame([features]).reindex(columns=FEATURES, fill_value=0)
+    X = pd.DataFrame([features]).reindex(
+        columns=FEATURES,
+        fill_value=0
+    )
 
-        prob = float(model.predict_proba(X)[0][1])
-        prediction = "PHISHING" if prob > 0.5 else "LEGITIMATE"
+    pred = model.predict(X)[0]
+    prob = model.predict_proba(X)[0].max()
 
-        return {
-            "url": url,
-            "prediction": prediction,
-            "probability": round(prob, 4)
-        }
+    return {
+        "url": url,
+        "prediction": "phishing" if pred == 1 else "legitimate",
+        "confidence": round(float(prob), 3)
+    }
 
-    except Exception as e:
-        logger.exception("Prediction failed")
-        return {"error": str(e)}
 
 
 @app.post("/batch")
@@ -78,14 +74,19 @@ async def explain(url: str):
         "shap_values": shap_values
     }
 @app.get("/drift")
-async def drift(url: str):
-    features = await extract_features_async(url)
-    X = pd.DataFrame([features]).reindex(columns=FEATURES, fill_value=0)
+async def drift(url: str = Query(...)):
+    features = extract_features(url)
 
-    drift_scores = detect_drift(X)
+    X = pd.DataFrame([features]).reindex(
+        columns=FEATURES,
+        fill_value=0
+    )
+
+    drift_score = float(X.abs().mean().mean())
 
     return {
         "url": url,
-        "drift_scores": drift_scores,
-        "drift_detected": any(v > 3 for v in drift_scores.values())
+        "drift_score": round(drift_score, 4),
+        "status": "ok"
     }
+
