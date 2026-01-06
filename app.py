@@ -15,8 +15,8 @@ model = joblib.load("model.pkl")
 FEATURES = joblib.load("features.pkl")
 
 @app.get("/predict")
-async def predict(url: str = Query(...)):
-    features = extract_features(url)
+async def predict(url: str):
+    features = await extract_features_async(url)
 
     X = pd.DataFrame([features]).reindex(
         columns=FEATURES,
@@ -24,12 +24,12 @@ async def predict(url: str = Query(...)):
     )
 
     pred = model.predict(X)[0]
-    prob = model.predict_proba(X)[0].max()
+    proba = model.predict_proba(X)[0].max()
 
     return {
         "url": url,
         "prediction": "phishing" if pred == 1 else "legitimate",
-        "confidence": round(float(prob), 3)
+        "confidence": round(float(proba), 3)
     }
 
 
@@ -74,19 +74,16 @@ async def explain(url: str):
         "shap_values": shap_values
     }
 @app.get("/drift")
-async def drift(url: str = Query(...)):
-    features = extract_features(url)
+async def drift(url: str):
+    features = await extract_features_async(url)
 
-    X = pd.DataFrame([features]).reindex(
-        columns=FEATURES,
-        fill_value=0
-    )
-
-    drift_score = float(X.abs().mean().mean())
+    missing = [f for f in FEATURES if f not in features]
 
     return {
         "url": url,
-        "drift_score": round(drift_score, 4),
-        "status": "ok"
+        "missing_features": missing,
+        "feature_count": len(features),
+        "expected_features": len(FEATURES)
     }
+
 
